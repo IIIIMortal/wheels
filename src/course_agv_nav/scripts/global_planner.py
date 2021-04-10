@@ -9,11 +9,15 @@ from nav_msgs.msg import OccupancyGrid
 from std_msgs.msg import Bool
 import numpy as np
 import matplotlib.pyplot as plt
+import time
+import math
 
 ## TODO import your own planner
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# 为了之后可以更加方便地添加路径规划函数，我将planner单独设置为一个class
 class MYplanner:
     def __init__(self,o,s,g,m,Map):
+        # 接下来这个部分将global_planner中获得到的地图信息初始化为自己的class内的变量
         self.ox = o[0]
         self.oy = o[1]
         self.sx = s[0]
@@ -25,7 +29,11 @@ class MYplanner:
         self.t = [(1,0), (0,1),(-1,0),(0,-1)]
         self.map = Map
 
-    def Generate_Path(self,ox,oy,sx,sy,gx,gy,mx,my):
+    def GP_BFS(self,ox,oy,sx,sy,gx,gy,mx,my):
+        # 这个部分就是我写的利用BFS算法获得的生成路径函数
+        # Opos是一个set，里面是的传入的障碍物的坐标
+        # gone是一个二维list，里面存放着到过的路径
+        # queue顾名思义，就是放着尚未到达的节点，每次到达新的位置的时候就判断周围可以走到下一步的点并且将其放进去
         Oposition = np.vstack((ox,oy)).T
         Opos=set()
         for i in Oposition:
@@ -34,25 +42,29 @@ class MYplanner:
         queue = []
         head,tail=0,0
         queue.append((sx,sy))
+        # 初始化起点和队列
         gone[sx][sy]=(-2,-2)
         step = 0
         fx = sx
         fy = sy
-        # print(Oposition.tolist())
+        # 在队列内还有元素的时候就不停止
         while head<=tail:
             (cx,cy) = queue[head]
             head+=1
             step = step+1
             if cx == gx and cy == gy:
+                # 如果找到了终点就马上退出
                 print("success")
                 break
             for i in range(4):
+                # 试探周围的四个方位
                 nx = cx+self.t[i][0]
                 ny = cy+self.t[i][1]
                 #print((nx,ny) not in Opos)
                 #print((nx,ny) in Opos)
                 #print((nx*self.map.info.resolution+self.map.info.origin.position.x,ny*self.map.info.resolution+self.map.info.origin.position.y))
                 if nx>=0 and nx<mx and ny>=0 and ny<my and ((nx,ny) not in Opos) and gone[nx][ny][0]==-1:
+                    # 如果下一个位置可以走（之前没有走过也不是障碍物），就放进队列
                     tail+=1
                     queue.append((nx,ny))
                     gone[nx][ny] = (cx,cy)
@@ -63,6 +75,7 @@ class MYplanner:
         tx = gx
         ty = gy
         while True:
+            # 从终点开始一步步走回去，将路径加入list找到起点的时候就退出
             print("ttt",tx,ty)
             if (tx==sx and ty==sy) or tx<0:
                 rx.append(sx)
@@ -75,7 +88,82 @@ class MYplanner:
         print("ry",ry)
 
         return rx,ry
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+    def GP_Astar(self,ox,oy,sx,sy,gx,gy,mx,my):
+
+        Opos = np.vstack((ox,oy)).T.tolist()
+        gone = [[(-1,-1)]*my for i in range(mx)]#用来记录上一个点
+        mark = [[0]*my for i in range(mx)]#用来标记这个点有没有走过
+        value = np.array([[1000]*my for i in range(mx)])
+        final_flag = 0
+
+        queue = []
+        queue.append((sx,sy))
+
+        gone[sx][sy] = (-2,-2)
+        mark[sx][sy] = 1
+        fx,fy = sx,sy
+        while len(queue):
+            # 接下来为了找到queue中距离值最小的点
+            
+            min = 10000
+            print(len(queue))
+            for i in range(len(queue)):
+                if value[queue[i][0]][queue[i][1]] < min:
+                    min = value[queue[i][0]][queue[i][1]]
+                    index = i
+                    cx,cy = queue[i]
+            print("><")
+            print((cx,cy))
+            del queue[i]#从待选的点中拿出来
+
+            mark[cx][cy] = 1
+            # 拿到新的点之后，开始试探其九宫格子内的点
+            if cx == gx and cy == gy:
+                final_flag=1
+                print("success")
+                break
+
+            for i in range(-1,2):
+                for j in range(-1,2):
+                    nx,ny=cx+i,cy+j
+                    ndis = math.sqrt((gx-nx)**2 + (gy-ny)**2)
+                    if nx>=0 and nx < mx and ny>=0 and ny<my and [nx,ny] not in Opos and mark[nx][ny]!=1:
+                        #如果不是障碍物并且也不是确定的点,并且还在地图内,就进入这个if 并且开始判断并且更新
+                        if (nx,ny) not in queue:
+                            queue.append((nx,ny))
+                        if i*i + j*j == 0:#这里是排除掉是零点的情况
+                            continue
+                        if i*i + j*j == 1:
+                            if value[cx][cy]+1+ndis<value[nx][ny]:
+                                # TODO 更新
+                                value[nx][ny]=value[cx][cy]+1+ndis#当前点到下一个点的距离加上下一个点到终点的直线距离
+                                gone[nx][ny] = (cx,cy)
+                        if i*i + j*j > 1:
+                            if value[cx][cy]+ math.sqrt(2)+ndis<value[nx][ny]:
+                                # TODO 更新
+                                value[nx,ny]=value[cx][cy]+math.sqrt(2)+ndis
+                                gone[nx][ny] = (cx,cy)
+        rx = []
+        ry = []
+        tx = gx
+        ty = gy
+        while True:
+            # 从终点开始一步步走回去，将路径加入list找到起点的时候就退出
+            print("ttt",tx,ty)
+            if (tx==sx and ty==sy) or tx<0:
+                rx.append(sx)
+                ry.append(sy)
+                break
+            rx.append(tx)
+            ry.append(ty)
+            (tx,ty) = gone[tx][ty]
+        print("rx",rx)
+        print("ry",ry)
+
+        return rx,ry
+
+                
 
 class GlobalPlanner:
     def __init__(self):
@@ -83,7 +171,7 @@ class GlobalPlanner:
         self.plan_sy = 0.0
         self.plan_gx = 8.0
         self.plan_gy = -8.0
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
         self.sx = 0
         self.sy = 0
@@ -92,7 +180,7 @@ class GlobalPlanner:
         self.ox = []
         self.oy = []
 
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
         self.plan_grid_size = 0.3
         self.plan_robot_radius = 0.6
@@ -139,8 +227,11 @@ class GlobalPlanner:
         self.initPlanner()
         
         # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-        
-        rx,ry = self.planner.Generate_Path(self.ox,self.oy,self.sx,self.sy,self.gx,self.gy,self.mx,self.my)
+        start = time.time()
+        rx,ry = self.planner.GP_Astar(self.ox,self.oy,self.sx,self.sy,self.gx,self.gy,self.mx,self.my)
+        end = time.time()
+        print("<<<<<<<<<<<<<<<<<!!!!!")
+        print(end-start)
         rx = np.array(rx)
         ry = np.array(ry)
         print(rx)
